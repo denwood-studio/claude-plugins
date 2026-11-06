@@ -91,4 +91,34 @@ printf '{"check":{"command":"$(touch %s/pwned)"}}\n' "$tmp" > "$R/.claude/fleet-
 check "value-is-printed-not-executed" "$(get "$R" check.command)" "\$(touch $tmp/pwned)"
 check "value-left-no-side-effect" "$([ -e "$tmp/pwned" ] && echo ran || echo clean)" "clean"
 
+newrepo
+check "defaults-give-empty-bot-login-and-token-file" "$(get "$R" review.botLogin)|$(get "$R" review.tokenFile)" "|"
+
+newrepo
+echo '{"review":{"botLogin":"user-bot","tokenFile":"~/tok"}}' > "$CFG/fleet-workflow.json"
+check "user-layer-sets-bot-login-and-token-file" "$(get "$R" review.botLogin)|$(get "$R" review.tokenFile)" "user-bot|~/tok"
+
+newrepo
+echo '{"review":{"postToGitHub":true,"botLogin":"repo-bot","tokenFile":"/repo/tok"}}' > "$R/.claude/fleet-workflow.json"
+check "repo-layer-bot-login-and-token-file-are-ignored" "$(get "$R" review.botLogin)|$(get "$R" review.tokenFile)" "|"
+check "repo-layer-post-to-github-still-applies" "$(get "$R" review.postToGitHub)" "true"
+check "repo-layer-keys-are-absent-from-the-merged-json" "$(get "$R" | jq -c .review)" '{"postToGitHub":true,"botLogin":"","tokenFile":""}'
+
+newrepo
+echo '{"review":{"botLogin":"user-bot","tokenFile":"~/tok"}}' > "$CFG/fleet-workflow.json"
+echo '{"review":{"postToGitHub":true,"botLogin":"repo-bot","tokenFile":"/repo/tok"}}' > "$R/.claude/fleet-workflow.json"
+check "repo-layer-cannot-override-the-user-layer-login-or-token" "$(get "$R" review.botLogin)|$(get "$R" review.tokenFile)|$(get "$R" review.postToGitHub)" "user-bot|~/tok|true"
+
+newrepo
+echo '{"review":{"botLogin":"x"}}' > "$CFG/fleet-workflow.json"
+echo '{"review":"not-an-object"}' > "$R/.claude/fleet-workflow.json"
+get "$R" >/dev/null 2>&1; check "non-object-review-in-repo-layer-does-not-crash" "$?" "0"
+
+newrepo
+mkdir -p "$tmp/same$n"
+git -C "$tmp/same$n" init -q
+mkdir -p "$tmp/same$n/.claude"
+echo '{"review":{"botLogin":"from-the-user-layer"}}' > "$tmp/same$n/.claude/fleet-workflow.json"
+check "user-layer-at-the-repo-claude-dir-is-still-the-user-layer" "$(CLAUDE_CONFIG_DIR="$tmp/same$n/.claude" bash "$SETTINGS" "$tmp/same$n" review.botLogin)" "from-the-user-layer"
+
 exit "$fail"

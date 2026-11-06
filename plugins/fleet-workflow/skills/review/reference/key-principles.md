@@ -1,0 +1,17 @@
+# Reviewing — the bar for every finding
+
+## Key Principles
+
+- **Be specific, never vague** — say exactly what's wrong and how to fix it, and cite the evidence: if a pattern exists, reference it.
+- **Issue independent tool calls in one turn** — three file reads is one turn, not three.
+- **On a follow-up pass, ask whether what you raised was TRUE before asking whether the fix closes it**, re-deriving from the current tree. A wrong finding costs more than a missed one. Say plainly when a prior finding was wrong, and say what to **remove**.
+- **When the PR is a tool that measures agent runs, you are inside the measured population — run it and read your own row**. Applies to anything your execution feeds: transcripts, logs, memory stores, counters.
+- **Match verification cost to severity.** Booting the app, executing an accessor, building a mutant and running a suite are **required for anything raised as Critical or Significant**. Gate on the severity you *provisionally* reach and re-verify if the finding grows — never downgrade to Suggestion to dodge the check. A Suggestion may rest on reading: mark it `(by inspection; not executed)`. A prose-only PR has no executable surface: say so once.
+- **Prove behaviour by executing it.** Never reason about a mechanism from a method's definition — "X returns the stale value" is a claim about what the *data* holds, decided elsewhere. **"This test can't fail on Y" needs the mutant built and the suite run**, your own claims included: block-slicing regexes fail open, and a name anchor prefixing a longer sibling (`scrollTo`/`scrollTop`) matches the wrong line. Mutate *sideways*, not only by deleting the fix.
+- **An ABSENCE claim needs the query that would have found the thing**, one that could surface it rather than a neighbour that never could; an empty result is usually a cwd mistake, so re-run it rooted at `<WORKTREE>` before concluding. Arithmetic over a range must be **computed**, not reasoned.
+- **Never call something a violation unless the rule lives in a file the author can open** — the repo (code, docs, contributor guides) or this definition. A rule living only in your injected harness instructions is at most a proposal, and a fabricated standard makes the genuine findings beside it easy to dismiss. Re-read the author's wording for scope qualifiers before contradicting it.
+- **Verify cross-repo `file:line` citations against that repo's `origin/main`** — sibling checkouts drift like local `main`. `git -C <sibling> fetch origin --quiet`, then `show origin/main:<path> | grep -n <identifier>`; recommend **file + identifier**.
+- **Distinguish severity clearly**, **acknowledge good work**, and **don't nitpick formatting** where a linter exists.
+- **Never ask for a comment.** On comments your one move either way is delete (skill Step 3). If removing every comment request empties your review, it *is* empty: say so and approve.
+- **Consider the PR scope** — don't demand refactors of untouched code unless the change makes existing problems significantly worse — and **respect the repo's stated rules**: "don't add error handling for scenarios that can't happen" and the like are not findings.
+- **The outcome check is not a licence to re-litigate the ticket.** Your job is whether the diff delivered what was asked, not whether asking for it was right. A better idea than the ticket's is a `### Judgment calls` line, never a finding.
