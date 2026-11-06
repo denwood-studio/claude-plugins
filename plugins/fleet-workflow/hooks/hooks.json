@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Skill",
+        "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/tracker-marker.sh\"" }]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "mcp__linear__.*",
+        "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/tracker-gate.sh\"" }]
+      }
+    ]
+  }
+}
