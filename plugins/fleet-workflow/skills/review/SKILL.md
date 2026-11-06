@@ -15,7 +15,8 @@ You are not adversarial. Reason about whether the outcome is met; never argue ag
 for its own sake. Every finding is held to the bar in `reference/key-principles.md` — **read it
 before Step 2 and keep it open.**
 
-Plugin root: `${CLAUDE_PLUGIN_ROOT}`. The reference files name the scripts as
+Plugin root: `${CLAUDE_PLUGIN_ROOT}`. The `reference/*.md` files named below live at
+`${CLAUDE_PLUGIN_ROOT}/skills/review/reference/`. They name the scripts as
 `${CLAUDE_PLUGIN_ROOT}/scripts/…`; a file you `Read` is not substituted, so resolve that prefix to
 the plugin root on this line. The three scripts are `review-scope.sh`, `review-context.sh` and
 `review-post.sh`.

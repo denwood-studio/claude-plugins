@@ -28,7 +28,7 @@ agent reviewed:
 ## The procedure
 
 1. Resolve `PR=<number>` and `REPO=<owner>/<repo>` (from Step 1, or `gh pr view --json number,headRepositoryOwner,headRepository`).
-2. Write the review to `REVIEW=$(mktemp /tmp/review-XXXXXX)` — the `X`s must be **trailing** with no suffix, or BSD/macOS `mktemp` takes them literally and concurrent runs on the same PR number collide. Prefix a fixed three-line header:
+2. Compose the review. Prefix a fixed three-line header:
 
    ```markdown
    🤖 **Automated review**
@@ -45,10 +45,19 @@ agent reviewed:
 
    **The trailer is load-bearing** — `review-scope.sh` reads it to scope your next pass (last occurrence wins, so quoting an earlier one is safe), and it never renders. `**Reviewed at:**` stays as the human-facing line and the parse fallback for older reviews.
 3. Map the verdict: **APPROVE** / **APPROVE WITH SUGGESTIONS** → `--approve`; **REQUEST CHANGES** / **BLOCK** → `--request-changes`. (GitHub has no BLOCK event; the distinction survives only in the `**Verdict:**` line.)
-4. Submit, in **one Bash call**:
+4. Write the body and submit it in **one Bash call**. Shell variables do not survive between Bash
+   calls, and `Write` is not available to you, so the file is created by a heredoc in the same call
+   that runs the script, at a fixed path under the worktree's git dir (no `mktemp`, nothing outside
+   the checkout). Substitute the literal values for `<WORKTREE>`, `<PR>` and `<owner>/<repo>`, and
+   paste the full body between the markers; the quoted marker keeps the shell from expanding
+   anything inside it:
 
    ```sh
-   ${CLAUDE_PLUGIN_ROOT}/scripts/review-post.sh <WORKTREE> <PR> <owner>/<repo> <--approve|--request-changes> "$REVIEW"
+   BODY="$(git -C <WORKTREE> rev-parse --absolute-git-dir)/review-<PR>.md"
+   cat > "$BODY" <<'REVIEW_BODY_END'
+   <the full review body, header first, DAR-STATE trailer last>
+   REVIEW_BODY_END
+   ${CLAUDE_PLUGIN_ROOT}/scripts/review-post.sh <WORKTREE> <PR> <owner>/<repo> <--approve|--request-changes> "$BODY"
    ```
 
    It prints exactly one line and always exits 0:
