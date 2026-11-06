@@ -15,7 +15,7 @@ PATTERNS=(
   '(?i)storyfolio|digibooks'
   'dar-github-token'
   '\.secrets'
-  '(?i)\b(bob|georgia|igor|carla|priya|patricia|frank|boris|tim|robert)\b'
+  '(?i)\b(bob|georgia|igor|carla|priya|patricia|frank|boris|tim|robert|grill)\b'
 )
 
 # prints "<file>: <pattern>" per hit; returns 1 on any hit
@@ -57,6 +57,10 @@ jq '.plugins[] | select(.name == "fleet-workflow")' "$MARKETPLACE" > "$tmp/entry
 [ -s "$tmp/entry.json" ] || { echo "FAIL [marketplace-has-fleet-workflow-entry]"; fail=1; }
 rc=0; out="$(scan_file "$tmp/entry.json")" || rc=$?
 report "marketplace-entry-is-public-clean" clean "$rc" "$out"
+
+jq 'del(.plugins)' "$MARKETPLACE" > "$tmp/marketplace-top.json"
+rc=0; out="$(scan_file "$tmp/marketplace-top.json")" || rc=$?
+report "marketplace-top-level-fields-are-public-clean" clean "$rc" "$out"
 
 probe() {
   local name="$1" text="$2" f="$tmp/probe-$1.txt"

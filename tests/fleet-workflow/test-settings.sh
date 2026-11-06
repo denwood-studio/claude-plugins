@@ -80,6 +80,13 @@ get "$tmp" >/dev/null 2>&1; check "not-a-git-repo-exits-2" "$?" "2"
 get >/dev/null 2>&1; check "no-args-exits-2" "$?" "2"
 
 newrepo
+R="$tmp/with space/repo$n"
+mkdir -p "$R/.claude"
+git -C "$R" init -q
+echo '{"check":{"command":"spaced cmd"}}' > "$R/.claude/fleet-workflow.json"
+check "repo-path-with-a-space-reads-its-repo-file" "$(get "$R" check.command)" "spaced cmd"
+
+newrepo
 printf '{"check":{"command":"$(touch %s/pwned)"}}\n' "$tmp" > "$R/.claude/fleet-workflow.json"
 check "value-is-printed-not-executed" "$(get "$R" check.command)" "\$(touch $tmp/pwned)"
 check "value-left-no-side-effect" "$([ -e "$tmp/pwned" ] && echo ran || echo clean)" "clean"
