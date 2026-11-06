@@ -1,0 +1,12 @@
+{
+  "name": "denwood-studio",
+  "owner": { "name": "Denwood Studio" },
+  "metadata": { "description": "Claude Code plugins from Denwood Studio" },
+  "plugins": [
+    {
+      "name": "fleet-workflow",
+      "source": "./plugins/fleet-workflow",
+      "description": "A ticket workflow for Claude Code sessions run under FleetManager, with per-repo settings."
+    }
+  ]
+}

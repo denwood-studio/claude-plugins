@@ -1,0 +1,7 @@
+{
+  "name": "fleet-workflow",
+  "version": "0.1.0",
+  "description": "A ticket workflow for Claude Code sessions run under FleetManager, with per-repo settings.",
+  "author": { "name": "Denwood Studio" },
+  "license": "MIT"
+}
