@@ -1,1 +1,1 @@
-{"tracker":{"team":"","project":""},"check":{"command":""},"worktree":{"setup":"scripts/worktree_setup.sh"},"review":{"postToGitHub":false}}
+{"tracker":{"team":"","project":""},"check":{"command":""},"worktree":{"setup":"scripts/worktree_setup.sh"},"review":{"postToGitHub":false,"botLogin":"","tokenFile":""}}

@@ -10,13 +10,19 @@ defaults="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/defaults.json"
 layers=("$defaults" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/fleet-workflow.json" "$root/.claude/fleet-workflow.json")
 
 present=()
-for f in "${layers[@]}"; do
+repo_layer=""
+for i in 0 1 2; do
+  f="${layers[$i]}"
   [ -e "$f" ] || continue
   jq -s -e 'length == 1 and (.[0] | type == "object")' "$f" >/dev/null 2>&1 || { echo "settings.sh: $f is not a valid JSON object" >&2; exit 1; }
-  present+=("$f")
+  if [ "$i" -eq 2 ]; then repo_layer="$f"; else present+=("$f"); fi
 done
 
 merged="$(jq -s 'reduce .[] as $l ({}; . * $l)' "${present[@]}")" || exit 1
+if [ -n "$repo_layer" ]; then
+  merged="$(jq -n --argjson m "$merged" --slurpfile r "$repo_layer" \
+    '$m * ($r[0] | if (.review | type) == "object" then del(.review.botLogin, .review.tokenFile) else . end)')" || exit 1
+fi
 
 if [ $# -eq 1 ]; then
   printf '%s\n' "$merged"
