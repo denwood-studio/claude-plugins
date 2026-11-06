@@ -19,6 +19,7 @@ echo "$*" >> "${GH_STUB_LOG:-/dev/null}"
 case "$*" in
   *baseRefName*) printf '%s' "${GH_STUB_BASE:-main}"; exit 0 ;;
 esac
+if [ -n "${GH_STUB_REVIEWS:-}" ]; then printf '%s' "$GH_STUB_REVIEWS"; exit 0; fi
 if [ -n "${GH_STUB_BODY:-}" ]; then
   BODY="$GH_STUB_BODY" \
     AT="${GH_STUB_AT-2026-09-04T07:33:52Z}" \
@@ -37,7 +38,6 @@ echo '{"review":{"botLogin":"review-bot"}}' > "$CLAUDE_CONFIG_DIR/fleet-workflow
 
 export GH_STUB_LOG="$tmp/gh.log"
 
-# Repo: main A -> B -> C (HEAD), plus S on a side branch (never an ancestor of C).
 repo="$tmp/repo"
 mkdir -p "$repo"
 git -C "$repo" init -q -b main
@@ -154,10 +154,18 @@ assert_contains "foreign-login reason" "$out" "REASON: first-pass"
 assert_absent "foreign-login no timestamp" "$out" "PRIOR_REVIEWED_AT"
 assert_absent "foreign-login no body" "$out" "PRIOR_REVIEW:"
 
-# Anchored delta from the configured login, while a later review by another login is ignored.
 out=$(GH_STUB_LOGIN=review-bot run "<!-- DAR-STATE sha=$A -->")
 assert_contains "configured-login anchors the delta" "$out" "RANGE: $A..HEAD"
 assert_contains "configured-login reason" "$out" "REASON: anchored at $A"
+
+review_json() { jq -n --arg l "$1" --arg b "$2" '{author:{login:$l},submittedAt:"2026-09-04T07:33:52Z",body:$b}'; }
+reviews() { printf '%s\n' "$@" | jq -s '{reviews:.}'; }
+
+out=$(GH_STUB_REVIEWS="$(reviews "$(review_json review-bot "<!-- DAR-STATE sha=$B -->")" "$(review_json someone-else "LGTM")")" run "")
+assert_contains "a-later-review-by-another-login-does-not-hide-the-bot-anchor" "$out" "RANGE: $B..HEAD"
+
+out=$(GH_STUB_REVIEWS="$(reviews "$(review_json review-bot "<!-- DAR-STATE sha=$A -->")" "$(review_json review-bot "<!-- DAR-STATE sha=$B -->")")" run "")
+assert_contains "the-bot-latest-review-anchors-the-delta-not-its-first" "$out" "RANGE: $B..HEAD"
 
 echo '{"review":{"botLogin":"other-bot"}}' > "$CLAUDE_CONFIG_DIR/fleet-workflow.json"
 out=$(GH_STUB_LOGIN=review-bot run "<!-- DAR-STATE sha=$B -->")
@@ -165,7 +173,6 @@ assert_contains "login-change-ignores-the-old-bot" "$out" "REASON: first-pass"
 out=$(GH_STUB_LOGIN=other-bot run "<!-- DAR-STATE sha=$B -->")
 assert_contains "login-change-follows-the-new-bot" "$out" "RANGE: $B..HEAD"
 
-# No login: a full pass, and the reviews lookup is never made.
 rm "$CLAUDE_CONFIG_DIR/fleet-workflow.json"
 out=$(run "<!-- DAR-STATE sha=$B -->")
 assert_contains "no-login scope" "$out" "SCOPE: full"
