@@ -32,7 +32,7 @@ It exits 0 whenever the audit completes, whatever the verdict. It exits 2 on a u
 
 **`repo <dir>`**
 
-- Dockerfiles and Containerfiles (`Dockerfile`, `Dockerfile.*`, `*.Dockerfile`, `*.dockerfile`, `Containerfile`, `Containerfile.*`), anywhere outside `.git` and `node_modules`. Each file is split into stages at `FROM`. A stage is CLEAR only when it proves a fixed `ca-certificates`: a `dpkg --compare-versions ... ca-certificates ... ge|gt|eq <version>` check, an `apt` or `apt-get` pin `ca-certificates=<version>`, or an `apk` pin `ca-certificates=<version>` or `>=<version>`, with a version that is fixed. A stage inherits the best status of its parent stages. A file takes its worst stage. Stages built `FROM scratch` are not assessed. Stages built on an RPM-family image (UBI, RHEL, CentOS, Fedora, Rocky, Alma, Amazon Linux, Oracle Linux, SUSE) get a `NOT ASSESSED` line naming the file and the image, because the fixed versions here are for Debian, Ubuntu and Alpine.
+- Dockerfiles and Containerfiles (`Dockerfile`, `Dockerfile.*`, `*.Dockerfile`, `*.dockerfile`, `Containerfile`, `Containerfile.*`), anywhere outside `.git` and `node_modules`. Each file is split into stages at `FROM`. A stage is CLEAR only when it proves a fixed `ca-certificates`: a `dpkg --compare-versions ... ca-certificates ... ge|gt|eq <version>` check, an `apt` or `apt-get` pin `ca-certificates=<version>`, or an `apk` pin `ca-certificates=<version>` or `>=<version>`, with a version that is fixed. A stage inherits the best status of its parent stages. A file takes its worst stage. Stages built `FROM scratch` are not assessed. Stages built on an RPM-family image (UBI, RHEL, CentOS, Fedora, Rocky, Alma, Amazon Linux, Oracle Linux, SUSE) get an `UNCONFIRMED` line naming the file and the image, because the fixed versions here are for Debian, Ubuntu and Alpine and the image's trust store cannot be read from the Dockerfile. A stage that runs `apt`, `apt-get`, `aptitude` or `apk` (itself or in a parent stage) is never treated as RPM-family, whatever its image name contains.
 - PEM certificate bundles: every text file outside `.git`, including inside `node_modules`, vendor directories and virtualenvs, that contains `-----BEGIN CERTIFICATE-----`. Each certificate is fingerprinted (SHA-256 of the DER bytes) and compared with the certificates in the data file. Copies bundled inside dependencies are the usual hidden exposure.
 
 If a search cannot finish, for example because a directory is unreadable, the report says `UNCONFIRMED` for it and never `CLEAR`.
@@ -88,7 +88,7 @@ The tests check this: a fixture repo has the same file stat manifest and `git st
 - lockfiles and version pins
 - images pulled by name (compose files, CI)
 - runtimes inside images
-- images built on RPM-family distributions (UBI, RHEL, CentOS, Fedora, Rocky, Alma, Amazon Linux, Oracle Linux, SUSE); the report lists them as `NOT ASSESSED`
+- images built on RPM-family distributions (UBI, RHEL, CentOS, Fedora, Rocky, Alma, Amazon Linux, Oracle Linux, SUSE); the report lists them as `UNCONFIRMED`, so the verdict is never CLEAR over one
 - binary keystores (`.jks`, `.p12`, `.pfx`, `.der`, `.p7b`, `cacerts`); the report counts them
 - the live TLS behaviour of built images
 

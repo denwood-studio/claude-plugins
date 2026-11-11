@@ -147,6 +147,7 @@ BEGIN {
   INST_RE = "(^|[^A-Za-z0-9_-])(apt|apt-get|aptitude|apk|dnf|yum|microdnf|tdnf|zypper)[ \t]([^;&|]*[ \t])?(install|reinstall|add|upgrade|dist-upgrade|full-upgrade|--only-upgrade)[ \t][^;&|]*ca-certificates"
   INST2_RE = "(^|[^A-Za-z0-9_-])(dnf|yum|microdnf|tdnf)[ \t]([^;&|]*[ \t])?(update|distro-sync)[ \t][^;&|]*ca-certificates"
   UP_RE = "(^|[^A-Za-z0-9_-])((apt|apt-get|aptitude)[ \t]([^;&|]*[ \t])?(upgrade|dist-upgrade|full-upgrade|safe-upgrade)|apk[ \t]([^;&|]*[ \t])?upgrade|(dnf|yum|microdnf|tdnf)[ \t]([^;&|]*[ \t])?(upgrade|update|distro-sync))([ \t;&|]|$)"
+  APTUSE_RE = "(^|[^A-Za-z0-9_-])(apt|apt-get|aptitude)[ \t]([^;&|]*[ \t])?(update|install|upgrade|dist-upgrade|full-upgrade|remove|purge|autoremove)([ \t;&|]|$)|(^|[^A-Za-z0-9_-])apk[ \t]([^;&|]*[ \t])?(add|update|upgrade|del)([ \t;&|]|$)"
   RPM_RE = "(^|[/:._-])(ubi|rhel|redhat|centos|fedora|rockylinux|almalinux|amazonlinux|oraclelinux|opensuse|suse|sles|bci|photon|azurelinux|mariner)[0-9]*([/:._-]|$)"
 }
 function relname(   r) {
@@ -159,7 +160,12 @@ function family(img,   l) {
   l = tolower(img)
   return (l ~ /alpine|wolfi|chainguard/) ? "apk:ca-certificates" : "dpkg:ca-certificates"
 }
-function isrpm(img) { return tolower(img) ~ RPM_RE }
+function isrpm(i,   img, p) {
+  img = tolower(RIMG[i])
+  if (img !~ RPM_RE) return 0
+  for (p = i; p; p = SPAR[p]) if (SAPT[p]) return 0
+  return 1
+}
 function showimg(img) {
   gsub(/[^ -~]/, "?", img)
   if (length(img) > 80) img = substr(img, 1, 80) "..."
@@ -179,7 +185,7 @@ function handle(ln,   t, n, k, w, lc, i, s, m) {
     while (k <= n && t[k] ~ /^--/) k++
     if (k > n) return
     ns++
-    SIMG[ns] = t[k]; SNAME[ns] = ""; SPAR[ns] = 0; SPROOF[ns] = ""; SINST[ns] = 0
+    SIMG[ns] = t[k]; SNAME[ns] = ""; SPAR[ns] = 0; SPROOF[ns] = ""; SINST[ns] = 0; SAPT[ns] = 0
     if (k + 2 <= n && toupper(t[k + 1]) == "AS") SNAME[ns] = tolower(t[k + 2])
     lc = tolower(t[k])
     for (i = ns - 1; i >= 1; i--) if (SNAME[i] != "" && SNAME[i] == lc) { SPAR[ns] = i; break }
@@ -206,6 +212,7 @@ function handle(ln,   t, n, k, w, lc, i, s, m) {
     sub(/.*=/, "", m); proof("apk:ca-certificates", m)
   }
   if (ln ~ INST_RE || ln ~ INST2_RE || ln ~ UP_RE) SINST[ns] = 1
+  if (ln ~ APTUSE_RE) SAPT[ns] = 1
 }
 function own(i) { if (SPROOF[i] != "") return 2; if (SINST[i]) return 1; return 0 }
 function flush(   i, p, b, q, worst, anyass, anyscr, anyrpm, rel, f, img, doneimg, pv, npv, seenpv, txt) {
@@ -216,12 +223,12 @@ function flush(   i, p, b, q, worst, anyass, anyscr, anyrpm, rel, f, img, doneim
   for (i = 1; i <= ns; i++) {
     ST[i] = -1
     if (SSCR[i]) { anyscr = 1; continue }
-    if (isrpm(RIMG[i])) {
+    if (isrpm(i)) {
       anyrpm = 1
       img = showimg(SIMG[i])
       if (SPAR[i] == 0 && index(doneimg, "|" img "|") == 0) {
         doneimg = doneimg "|" img "|"
-        print rel "\tNOT ASSESSED " rel ": stage FROM " img " is an RPM-family image, and the fixed ca-certificates versions here are for Debian, Ubuntu and Alpine — check your image vendor\047s advisory, or the built image with: docker run --rm <your-image> rpm -q ca-certificates"
+        print rel "\tUNCONFIRMED " rel ": stage FROM " img " is an RPM-family image, whose trust store this audit cannot assess (the fixed ca-certificates versions here are for Debian, Ubuntu and Alpine) — confirm the built image with: docker run --rm <your-image> rpm -q ca-certificates, and your image vendor\047s advisory"
       }
       continue
     }

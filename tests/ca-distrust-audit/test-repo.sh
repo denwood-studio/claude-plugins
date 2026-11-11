@@ -98,31 +98,46 @@ printf 'FROM rockylinux:9 AS base\nRUN echo base\nFROM base AS app\nRUN echo app
 printf 'FROM public.ecr.aws/amazonlinux/amazonlinux:2023\nRUN dnf install -y curl\n' > "$d/Dockerfile.al"
 printf 'FROM ubuntu:24.04\nRUN apt-get install -y curl\n' > "$d/Dockerfile.ubuntu"
 out="$(audit "$d")"
-has "rpm-image-is-not-assessed-and-names-the-from-image" "$out" '^NOT ASSESSED Containerfile: stage FROM fedora:44 is an RPM-family image'
-has "ubi-image-is-not-assessed" "$out" '^NOT ASSESSED Dockerfile: stage FROM registry\.access\.redhat\.com/ubi9/ubi-minimal:9\.4 '
-has "rocky-image-is-not-assessed-once-for-its-stages" "$out" '^NOT ASSESSED Dockerfile\.rocky: stage FROM rockylinux:9 '
-[ "$(printf '%s\n' "$out" | grep -c '^NOT ASSESSED Dockerfile\.rocky: ')" -eq 1 ] && pass "rpm-parent-stage-is-reported-once" || bad "rpm-parent-stage-is-reported-once" "not exactly one line"
-has "amazonlinux-image-is-not-assessed" "$out" '^NOT ASSESSED Dockerfile\.al: stage FROM public\.ecr\.aws/amazonlinux/amazonlinux:2023 '
-lacks "rpm-image-gets-no-dpkg-advice" "$out" '^(FLAG|UNCONFIRMED|CLEAR) (Containerfile|Dockerfile|Dockerfile\.rocky|Dockerfile\.al): '
+has "rpm-image-is-unconfirmed-and-names-the-from-image" "$out" '^UNCONFIRMED Containerfile: stage FROM fedora:44 is an RPM-family image'
+has "ubi-image-is-unconfirmed" "$out" '^UNCONFIRMED Dockerfile: stage FROM registry\.access\.redhat\.com/ubi9/ubi-minimal:9\.4 '
+has "rocky-image-is-unconfirmed-once-for-its-stages" "$out" '^UNCONFIRMED Dockerfile\.rocky: stage FROM rockylinux:9 '
+[ "$(printf '%s\n' "$out" | grep -c '^UNCONFIRMED Dockerfile\.rocky: ')" -eq 1 ] && pass "rpm-parent-stage-is-reported-once" || bad "rpm-parent-stage-is-reported-once" "not exactly one line"
+has "amazonlinux-image-is-unconfirmed" "$out" '^UNCONFIRMED Dockerfile\.al: stage FROM public\.ecr\.aws/amazonlinux/amazonlinux:2023 '
+lacks "rpm-image-is-not-flagged" "$out" '^FLAG (Containerfile|Dockerfile|Dockerfile\.rocky|Dockerfile\.al): '
+lacks "rpm-image-gets-no-dpkg-advice" "$out" '^UNCONFIRMED (Containerfile|Dockerfile|Dockerfile\.rocky|Dockerfile\.al): .*(dpkg-query|move to ca-certificates)'
 has "ubuntu-is-not-mistaken-for-an-rpm-image" "$out" '^FLAG Dockerfile\.ubuntu: '
 has "rpm-families-are-listed-under-not-checked" "$out" '^Not checked: .*RPM-family base images \(UBI, RHEL, CentOS, Fedora, '
 
 d="$(newrepo rpm-only)"
 printf 'FROM fedora:44\nRUN dnf -y install ca-certificates\n' > "$d/Dockerfile"
 out="$(audit "$d")"
-has "rpm-only-repo-reports-not-assessed" "$out" '^NOT ASSESSED Dockerfile: '
+has "rpm-only-repo-reports-unconfirmed" "$out" '^UNCONFIRMED Dockerfile: stage FROM fedora:44 '
 lacks "rpm-only-repo-is-not-reported-as-having-no-build-files" "$out" '^CLEAR container build files: none found$'
 lacks "rpm-image-is-never-clear-evidence" "$out" '^CLEAR Dockerfile'
+has "rpm-only-repo-verdict-is-unconfirmed" "$out" '^Verdict: UNCONFIRMED$'
+lacks "rpm-only-repo-verdict-is-not-clear" "$out" '^Verdict: CLEAR$'
 
 d="$(newrepo rpm-and-debian)"
 printf 'FROM debian:12 AS build\nRUN apt-get install -y curl\nFROM fedora:44\nRUN echo hi\n' > "$d/Dockerfile"
 out="$(audit "$d")"
 has "debian-stage-next-to-an-rpm-stage-is-still-assessed" "$out" '^FLAG Dockerfile: stage FROM debian:12 '
-has "rpm-stage-next-to-a-debian-stage-is-listed" "$out" '^NOT ASSESSED Dockerfile: stage FROM fedora:44 '
+has "rpm-stage-next-to-a-debian-stage-is-unconfirmed" "$out" '^UNCONFIRMED Dockerfile: stage FROM fedora:44 '
 
 d="$(newrepo rpm-and-clear)"
 printf 'FROM debian:12 AS build\n%s %s\nFROM fedora:44\nRUN echo hi\n' "$ASSERT_PREFIX" "$CHECK" > "$d/Dockerfile"
+has "rpm-stage-next-to-a-clear-stage-holds-the-verdict" "$(audit "$d")" '^Verdict: UNCONFIRMED$'
 has "clear-next-to-an-rpm-stage-says-so" "$(audit "$d")" '^CLEAR Dockerfile: .*; stages built on an RPM-family image are not assessed$'
+
+d="$(newrepo rpm-token-in-org-path)"
+printf 'FROM ghcr.io/photon-labs/api:bookworm\nRUN apt-get update && apt-get install -y curl\n' > "$d/Dockerfile"
+printf 'FROM registry.example.invalid/redhat-tools/runner:1\nRUN apk add --no-cache curl\n' > "$d/Dockerfile.apk"
+printf 'FROM ghcr.io/photon-labs/api:bookworm AS base\nRUN apt-get install -y curl\nFROM base AS app\nRUN echo app\n' > "$d/Dockerfile.stages"
+out="$(audit "$d")"
+has "rpm-token-in-an-org-path-with-apt-is-flagged" "$out" '^FLAG Dockerfile: stage FROM ghcr\.io/photon-labs/api:bookworm '
+has "rpm-token-in-an-org-path-with-apk-is-flagged" "$out" '^FLAG Dockerfile\.apk: '
+has "rpm-token-in-an-org-path-with-apt-in-the-parent-stage-is-flagged" "$out" '^FLAG Dockerfile\.stages: '
+lacks "rpm-token-in-an-org-path-is-not-called-rpm" "$out" 'RPM-family image'
+lacks "rpm-token-in-an-org-path-never-reads-clear" "$out" '^Verdict: CLEAR$'
 
 d="$(newrepo apt-update-alone)"
 printf 'FROM debian:12\nRUN apt-get update && apt-get install -y curl\n' > "$d/Dockerfile"
