@@ -1,0 +1,12 @@
+{
+  "name": "denwood-studio",
+  "owner": { "name": "Denwood Studio" },
+  "metadata": { "description": "Claude Code plugins from Denwood Studio" },
+  "plugins": [
+    {
+      "name": "ca-distrust-audit",
+      "source": "./plugins/ca-distrust-audit",
+      "description": "A read-only audit of whether your machine or repo still trusts a distrusted certificate authority chain, starting with the October 2026 eMudhra compromise."
+    }
+  ]
+}
