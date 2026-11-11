@@ -13,7 +13,7 @@ claude plugin install ca-distrust-audit@denwood-studio
 
 Then, in a Claude Code session, run `/ca-distrust-audit:audit`. It audits this Mac and the project you are in, and reads the report back to you.
 
-You can also run the script yourself. It needs bash 3.2 or later, POSIX awk, grep, find, xargs and openssl, plus `sw_vers` and `plutil` on macOS.
+You can also run the script yourself. It needs bash 3.2 or later, POSIX awk, grep, find, sh and openssl, plus `sw_vers` and `plutil` on macOS.
 
 ```
 plugins/ca-distrust-audit/scripts/audit.sh machine
@@ -32,15 +32,17 @@ It exits 0 whenever the audit completes, whatever the verdict. It exits 2 on a u
 
 **`repo <dir>`**
 
-- Dockerfiles and Containerfiles (`Dockerfile`, `Dockerfile.*`, `*.Dockerfile`, `*.dockerfile`, `Containerfile`, `Containerfile.*`), anywhere outside `.git` and `node_modules`. Each file is split into stages at `FROM`. A stage is CLEAR only when it proves a fixed `ca-certificates`: a `dpkg --compare-versions ... ca-certificates ... ge|gt|eq <version>` check, an `apt` or `apt-get` pin `ca-certificates=<version>`, or an `apk` pin `ca-certificates=<version>` or `>=<version>`, with a version that is fixed. A stage inherits the best status of its parent stages. A file takes its worst stage. Stages built `FROM scratch` are not assessed.
+- Dockerfiles and Containerfiles (`Dockerfile`, `Dockerfile.*`, `*.Dockerfile`, `*.dockerfile`, `Containerfile`, `Containerfile.*`), anywhere outside `.git` and `node_modules`. Each file is split into stages at `FROM`. A stage is CLEAR only when it proves a fixed `ca-certificates`: a `dpkg --compare-versions ... ca-certificates ... ge|gt|eq <version>` check, an `apt` or `apt-get` pin `ca-certificates=<version>`, or an `apk` pin `ca-certificates=<version>` or `>=<version>`, with a version that is fixed. A stage inherits the best status of its parent stages. A file takes its worst stage. Stages built `FROM scratch` are not assessed. Stages built on an RPM-family image (UBI, RHEL, CentOS, Fedora, Rocky, Alma, Amazon Linux, Oracle Linux, SUSE) get a `NOT ASSESSED` line naming the file and the image, because the fixed versions here are for Debian, Ubuntu and Alpine.
 - PEM certificate bundles: every text file outside `.git`, including inside `node_modules`, vendor directories and virtualenvs, that contains `-----BEGIN CERTIFICATE-----`. Each certificate is fingerprinted (SHA-256 of the DER bytes) and compared with the certificates in the data file. Copies bundled inside dependencies are the usual hidden exposure.
+
+If a search cannot finish, for example because a directory is unreadable, the report says `UNCONFIRMED` for it and never `CLEAR`.
 
 ## FLAG, UNCONFIRMED and CLEAR
 
 | Line | Meaning |
 | --- | --- |
 | `FLAG` | The audit found something that still trusts the chain, or is older than the fixed version. The line says what to move to. |
-| `UNCONFIRMED` | The audit cannot prove it either way, and the line says how you can confirm it yourself. Example: a Dockerfile installs `ca-certificates` but never asserts a version. Nothing fails the build on an old store, and a cached layer keeps the old one. |
+| `UNCONFIRMED` | The audit cannot prove it either way, and the line says how you can confirm it yourself. Example: a Dockerfile installs `ca-certificates` but never asserts a version. Nothing fails the build on an old store, and a cached layer keeps the old one. A search that could not finish is also UNCONFIRMED. |
 | `CLEAR` | The audit found proof the item is fixed, or found nothing wrong with it. |
 
 The last line is `Verdict: FLAGGED`, `UNCONFIRMED` or `CLEAR`: the worst of the lines above it. A CLEAR verdict covers only what was checked. Read the Not checked line.
@@ -86,6 +88,7 @@ The tests check this: a fixture repo has the same file stat manifest and `git st
 - lockfiles and version pins
 - images pulled by name (compose files, CI)
 - runtimes inside images
+- images built on RPM-family distributions (UBI, RHEL, CentOS, Fedora, Rocky, Alma, Amazon Linux, Oracle Linux, SUSE); the report lists them as `NOT ASSESSED`
 - binary keystores (`.jks`, `.p12`, `.pfx`, `.der`, `.p7b`, `cacerts`); the report counts them
 - the live TLS behaviour of built images
 

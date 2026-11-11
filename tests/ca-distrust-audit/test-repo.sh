@@ -7,7 +7,7 @@ SCRIPT="$PLUGIN/scripts/audit.sh"
 FIXTURES="$REPO/tests/ca-distrust-audit/fixtures"
 DATA="$PLUGIN/data/emudhra-2026-10.tsv"
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
+trap 'chmod -R u+rwx "$tmp" 2> /dev/null; rm -rf "$tmp"' EXIT
 
 fail=0
 pass() { echo "PASS [$1]"; }
@@ -86,10 +86,43 @@ has "unconfirmed-verdict" "$out" '^Verdict: UNCONFIRMED$'
 
 d="$(newrepo full-upgrade)"
 printf 'FROM debian:12\nRUN apt-get update && apt-get -y upgrade\n' > "$d/Dockerfile"
-printf 'FROM fedora:44\nRUN dnf -y update\n' > "$d/Containerfile"
+printf 'FROM registry.example.invalid/base:1\nRUN dnf -y update\n' > "$d/Containerfile"
 out="$(audit "$d")"
 has "apt-full-upgrade-is-unconfirmed" "$out" '^UNCONFIRMED Dockerfile: '
-has "dnf-update-is-unconfirmed" "$out" '^UNCONFIRMED Containerfile: '
+has "dnf-update-on-an-unclassified-image-is-unconfirmed" "$out" '^UNCONFIRMED Containerfile: '
+
+d="$(newrepo rpm)"
+printf 'FROM fedora:44\nRUN dnf -y update\n' > "$d/Containerfile"
+printf 'FROM registry.access.redhat.com/ubi9/ubi-minimal:9.4\nRUN microdnf install -y ca-certificates\n' > "$d/Dockerfile"
+printf 'FROM rockylinux:9 AS base\nRUN echo base\nFROM base AS app\nRUN echo app\n' > "$d/Dockerfile.rocky"
+printf 'FROM public.ecr.aws/amazonlinux/amazonlinux:2023\nRUN dnf install -y curl\n' > "$d/Dockerfile.al"
+printf 'FROM ubuntu:24.04\nRUN apt-get install -y curl\n' > "$d/Dockerfile.ubuntu"
+out="$(audit "$d")"
+has "rpm-image-is-not-assessed-and-names-the-from-image" "$out" '^NOT ASSESSED Containerfile: stage FROM fedora:44 is an RPM-family image'
+has "ubi-image-is-not-assessed" "$out" '^NOT ASSESSED Dockerfile: stage FROM registry\.access\.redhat\.com/ubi9/ubi-minimal:9\.4 '
+has "rocky-image-is-not-assessed-once-for-its-stages" "$out" '^NOT ASSESSED Dockerfile\.rocky: stage FROM rockylinux:9 '
+[ "$(printf '%s\n' "$out" | grep -c '^NOT ASSESSED Dockerfile\.rocky: ')" -eq 1 ] && pass "rpm-parent-stage-is-reported-once" || bad "rpm-parent-stage-is-reported-once" "not exactly one line"
+has "amazonlinux-image-is-not-assessed" "$out" '^NOT ASSESSED Dockerfile\.al: stage FROM public\.ecr\.aws/amazonlinux/amazonlinux:2023 '
+lacks "rpm-image-gets-no-dpkg-advice" "$out" '^(FLAG|UNCONFIRMED|CLEAR) (Containerfile|Dockerfile|Dockerfile\.rocky|Dockerfile\.al): '
+has "ubuntu-is-not-mistaken-for-an-rpm-image" "$out" '^FLAG Dockerfile\.ubuntu: '
+has "rpm-families-are-listed-under-not-checked" "$out" '^Not checked: .*RPM-family base images \(UBI, RHEL, CentOS, Fedora, '
+
+d="$(newrepo rpm-only)"
+printf 'FROM fedora:44\nRUN dnf -y install ca-certificates\n' > "$d/Dockerfile"
+out="$(audit "$d")"
+has "rpm-only-repo-reports-not-assessed" "$out" '^NOT ASSESSED Dockerfile: '
+lacks "rpm-only-repo-is-not-reported-as-having-no-build-files" "$out" '^CLEAR container build files: none found$'
+lacks "rpm-image-is-never-clear-evidence" "$out" '^CLEAR Dockerfile'
+
+d="$(newrepo rpm-and-debian)"
+printf 'FROM debian:12 AS build\nRUN apt-get install -y curl\nFROM fedora:44\nRUN echo hi\n' > "$d/Dockerfile"
+out="$(audit "$d")"
+has "debian-stage-next-to-an-rpm-stage-is-still-assessed" "$out" '^FLAG Dockerfile: stage FROM debian:12 '
+has "rpm-stage-next-to-a-debian-stage-is-listed" "$out" '^NOT ASSESSED Dockerfile: stage FROM fedora:44 '
+
+d="$(newrepo rpm-and-clear)"
+printf 'FROM debian:12 AS build\n%s %s\nFROM fedora:44\nRUN echo hi\n' "$ASSERT_PREFIX" "$CHECK" > "$d/Dockerfile"
+has "clear-next-to-an-rpm-stage-says-so" "$(audit "$d")" '^CLEAR Dockerfile: .*; stages built on an RPM-family image are not assessed$'
 
 d="$(newrepo apt-update-alone)"
 printf 'FROM debian:12\nRUN apt-get update && apt-get install -y curl\n' > "$d/Dockerfile"
@@ -180,11 +213,67 @@ has "pem-embedded-in-json-is-flagged" "$out" '^FLAG vendor/embedded\.json: conta
 lacks "never-advises-removing-a-root" "$out" '[Rr]emov'
 has "bundle-findings-leave-the-verdict-flagged" "$out" '^Verdict: FLAGGED$'
 
+has "pem-scan-completed-reports-no-scan-failure" "$out" '^FLAG '
+lacks "complete-scan-has-no-unconfirmed" "$out" '^UNCONFIRMED '
+
 d="$(newrepo bundle-clean)"
 cp "$FIXTURES/synthetic-test-ca.pem" "$d/ca.pem"
 out="$(audit "$d")"
 has "unlisted-bundle-reports-clear-without-naming-it" "$out" '^CLEAR certificate bundles: 1 PEM file\(s\) scanned, none contains a listed certificate$'
 has "unlisted-bundle-verdict-is-clear" "$out" '^Verdict: CLEAR$'
+
+d="$(newrepo bundles-with-a-fake-grep)"
+cp "$FIXTURES/aaa-certificate-services.pem" "$d/bundle.pem"
+printf 'FROM debian:12\nRUN apt-get install -y curl\n' > "$d/Dockerfile"
+mkdir -p "$tmp/fakebin"
+printf '#!/bin/sh\necho "grep: unrecognized option: --null" >&2\nexit 2\n' > "$tmp/fakebin/grep"
+printf '#!/bin/sh\necho "xargs: invalid option -- 0" >&2\nexit 2\n' > "$tmp/fakebin/xargs"
+chmod +x "$tmp/fakebin/grep" "$tmp/fakebin/xargs"
+real="$(audit "$d")"
+fake="$(PATH="$tmp/fakebin:$PATH" "$SCRIPT" repo "$d")"
+[ "$real" = "$fake" ] && pass "report-ignores-a-non-conforming-grep-and-xargs-on-the-users-path" || bad "report-ignores-a-non-conforming-grep-and-xargs-on-the-users-path" "reports differ"
+has "bundle-is-flagged-with-a-non-conforming-grep-first-on-path" "$fake" '^FLAG bundle\.pem: contains AAA Certificate Services'
+if grep -nE 'xargs|--null|-print0|-lI' "$SCRIPT" > "$tmp/portability.out"; then
+  bad "script-uses-no-xargs-or-non-posix-find-or-grep-options" "$(cat "$tmp/portability.out")"
+else
+  pass "script-uses-no-xargs-or-non-posix-find-or-grep-options"
+fi
+greps="$(grep -n 'grep' "$SCRIPT")"
+if [ "$(printf '%s\n' "$greps" | grep -c .)" -eq 1 ] && printf '%s\n' "$greps" | grep -qF "grep -l -F -e \"\$0\" \"\$@\" || [ \$? -eq 1 ]"; then
+  pass "the-only-grep-call-uses-posix-options-and-keeps-exit-status-2"
+else
+  bad "the-only-grep-call-uses-posix-options-and-keeps-exit-status-2" "$greps"
+fi
+
+if [ "$(id -u)" -eq 0 ]; then
+  echo "PASS [unreadable-directory-tests-skipped] skipped: root reads every directory"
+else
+  d="$(newrepo unreadable)"
+  printf 'FROM debian:12\n%s %s\n' "$ASSERT_PREFIX" "$CHECK" > "$d/Dockerfile"
+  mkdir -p "$d/locked"
+  cp "$FIXTURES/aaa-certificate-services.pem" "$d/locked/bundle.pem"
+  printf 'FROM debian:12\nRUN apt-get install -y curl\n' > "$d/locked/Dockerfile.dev"
+  chmod 000 "$d/locked"
+  out="$(audit "$d")"; rc=$?
+  chmod 755 "$d/locked"
+  [ "$rc" -eq 0 ] && pass "unreadable-directory-still-exits-0" || bad "unreadable-directory-still-exits-0" "exit $rc"
+  has "unreadable-directory-leaves-the-pem-scan-unconfirmed" "$out" '^UNCONFIRMED certificate bundles: .*did not complete'
+  has "unreadable-directory-leaves-the-dockerfile-search-unconfirmed" "$out" '^UNCONFIRMED container build files: .*did not complete'
+  lacks "unreadable-directory-is-never-clear-for-bundles" "$out" '^CLEAR certificate bundles'
+  lacks "unreadable-directory-is-never-clear-for-build-files-it-hid" "$out" '^CLEAR container build files: none found'
+  has "unreadable-directory-verdict-is-unconfirmed" "$out" '^Verdict: UNCONFIRMED$'
+  has "findings-from-readable-files-are-kept-when-the-scan-is-incomplete" "$out" '^CLEAR Dockerfile: '
+
+  d="$(newrepo unreadable-file)"
+  printf 'FROM debian:12\n%s %s\n' "$ASSERT_PREFIX" "$CHECK" > "$d/Dockerfile"
+  cp "$FIXTURES/aaa-certificate-services.pem" "$d/hidden.pem"
+  chmod 000 "$d/hidden.pem"
+  out="$(audit "$d")"
+  chmod 644 "$d/hidden.pem"
+  has "unreadable-file-leaves-the-pem-scan-unconfirmed" "$out" '^UNCONFIRMED certificate bundles: .*did not complete'
+  lacks "unreadable-file-is-never-clear-for-bundles" "$out" '^CLEAR certificate bundles'
+  has "unreadable-file-verdict-is-unconfirmed" "$out" '^Verdict: UNCONFIRMED$'
+fi
 
 d="$(newrepo keystores)"
 : > "$d/trust.jks"; : > "$d/store.p12"; mkdir -p "$d/lib"; : > "$d/lib/cacerts"

@@ -147,9 +147,10 @@ BEGIN {
   INST_RE = "(^|[^A-Za-z0-9_-])(apt|apt-get|aptitude|apk|dnf|yum|microdnf|tdnf|zypper)[ \t]([^;&|]*[ \t])?(install|reinstall|add|upgrade|dist-upgrade|full-upgrade|--only-upgrade)[ \t][^;&|]*ca-certificates"
   INST2_RE = "(^|[^A-Za-z0-9_-])(dnf|yum|microdnf|tdnf)[ \t]([^;&|]*[ \t])?(update|distro-sync)[ \t][^;&|]*ca-certificates"
   UP_RE = "(^|[^A-Za-z0-9_-])((apt|apt-get|aptitude)[ \t]([^;&|]*[ \t])?(upgrade|dist-upgrade|full-upgrade|safe-upgrade)|apk[ \t]([^;&|]*[ \t])?upgrade|(dnf|yum|microdnf|tdnf)[ \t]([^;&|]*[ \t])?(upgrade|update|distro-sync))([ \t;&|]|$)"
+  RPM_RE = "(^|[/:._-])(ubi|rhel|redhat|centos|fedora|rockylinux|almalinux|amazonlinux|oraclelinux|opensuse|suse|sles|bci|photon|azurelinux|mariner)[0-9]*([/:._-]|$)"
 }
 function relname(   r) {
-  r = FILENAME
+  r = CUR
   if (index(r, PFX) == 1) r = substr(r, length(PFX) + 1)
   gsub(/[^ -~]/, "?", r)
   return r
@@ -158,6 +159,7 @@ function family(img,   l) {
   l = tolower(img)
   return (l ~ /alpine|wolfi|chainguard/) ? "apk:ca-certificates" : "dpkg:ca-certificates"
 }
+function isrpm(img) { return tolower(img) ~ RPM_RE }
 function showimg(img) {
   gsub(/[^ -~]/, "?", img)
   if (length(img) > 80) img = substr(img, 1, 80) "..."
@@ -206,14 +208,23 @@ function handle(ln,   t, n, k, w, lc, i, s, m) {
   if (ln ~ INST_RE || ln ~ INST2_RE || ln ~ UP_RE) SINST[ns] = 1
 }
 function own(i) { if (SPROOF[i] != "") return 2; if (SINST[i]) return 1; return 0 }
-function flush(   i, p, b, q, worst, anyass, anyscr, rel, f, img, doneimg, pv, npv, seenpv, txt) {
+function flush(   i, p, b, q, worst, anyass, anyscr, anyrpm, rel, f, img, doneimg, pv, npv, seenpv, txt) {
   if (!ns) return
   rel = relname()
   print rel "\t@seen"
-  worst = 9; anyass = 0; anyscr = 0
+  worst = 9; anyass = 0; anyscr = 0; anyrpm = 0; doneimg = ""
   for (i = 1; i <= ns; i++) {
     ST[i] = -1
     if (SSCR[i]) { anyscr = 1; continue }
+    if (isrpm(RIMG[i])) {
+      anyrpm = 1
+      img = showimg(SIMG[i])
+      if (SPAR[i] == 0 && index(doneimg, "|" img "|") == 0) {
+        doneimg = doneimg "|" img "|"
+        print rel "\tNOT ASSESSED " rel ": stage FROM " img " is an RPM-family image, and the fixed ca-certificates versions here are for Debian, Ubuntu and Alpine — check your image vendor\047s advisory, or the built image with: docker run --rm <your-image> rpm -q ca-certificates"
+      }
+      continue
+    }
     if (NFIX[family(RIMG[i])] == 0) continue
     b = own(i); p = SPAR[i]
     while (p) { q = own(p); if (q > b) b = q; p = SPAR[p] }
@@ -221,7 +232,7 @@ function flush(   i, p, b, q, worst, anyass, anyscr, rel, f, img, doneimg, pv, n
     if (SPAR[i] == 0 && b < worst) worst = b
   }
   if (!anyass) {
-    if (anyscr) print rel "\tNOT ASSESSED " rel ": every stage is built FROM scratch, so there is no base image trust store to assess"
+    if (anyscr && !anyrpm) print rel "\tNOT ASSESSED " rel ": every stage is built FROM scratch, so there is no base image trust store to assess"
     return
   }
   if (worst == 2) {
@@ -230,7 +241,7 @@ function flush(   i, p, b, q, worst, anyass, anyscr, rel, f, img, doneimg, pv, n
       if (SPAR[i] != 0 || ST[i] != 2) continue
       if (index(doneimg, "|" SPROOF[i] "|") == 0) { doneimg = doneimg "|" SPROOF[i] "|"; txt = txt (npv++ ? ", " : "") SPROOF[i] }
     }
-    print rel "\tCLEAR " rel ": ca-certificates is asserted at a fixed version (" txt ")"
+    print rel "\tCLEAR " rel ": ca-certificates is asserted at a fixed version (" txt ")" (anyrpm ? "; stages built on an RPM-family image are not assessed" : "")
     return
   }
   doneimg = ""
@@ -248,6 +259,13 @@ function flush(   i, p, b, q, worst, anyass, anyscr, rel, f, img, doneimg, pv, n
       print rel "\tUNCONFIRMED " rel ": stage FROM " img " installs or upgrades ca-certificates without asserting a fixed version, and a cached layer keeps an old store — confirm the built image with: docker run --rm <your-image> dpkg-query -W ca-certificates (fixed: " fixedlist(f) ")"
   }
 }
+function endfile() {
+  if (cont) handle(buf)
+  cont = 0; buf = ""
+  flush()
+  ns = 0
+}
+FNR == 1 { if (NR > 1) endfile(); CUR = FILENAME }
 {
   sub(/\r$/, "")
   if ($0 ~ /^[ \t]*#/ || $0 ~ /^[ \t]*$/) next
@@ -255,36 +273,48 @@ function flush(   i, p, b, q, worst, anyass, anyscr, rel, f, img, doneimg, pv, n
   if (buf ~ /\\[ \t]*$/) { sub(/[ \t]*\\[ \t]*$/, "", buf); cont = 1; next }
   cont = 0; handle(buf); buf = ""
 }
-END { if (cont) handle(buf); flush() }
+END { endfile() }
 '
 
 AWK_PEM_EXTRACT='
 BEGIN {
   ROOT = ENVIRON["CA_ROOT"]; PFX = (ROOT == "/") ? "/" : ROOT "/"
   B = "-----BEGIN CERTIFICATE-----"; E = "-----END CERTIFICATE-----"
+  rc = ""; bad = 0
 }
-function emit(   r, b) {
+function emit(f,   r, b) {
   b = body; gsub("[^A-Za-z0-9+/=]", "", b)
   if (b == "") return
-  r = FILENAME
+  r = f
   if (index(r, PFX) == 1) r = substr(r, length(PFX) + 1)
   gsub(/[^ -~]/, "?", r)
   print r "\t" b
 }
-FNR == 1 { inb = 0; body = "" }
-{
-  ln = $0; gsub(/\\[nrt]/, " ", ln); gsub(/\r/, "", ln)
-  while (length(ln) > 0) {
-    if (!inb) {
-      p = index(ln, B)
-      if (!p) break
-      ln = substr(ln, p + length(B)); inb = 1; body = ""
-    } else {
-      p = index(ln, E)
-      if (p) { body = body substr(ln, 1, p - 1); ln = substr(ln, p + length(E)); inb = 0; emit() }
-      else { body = body ln; ln = "" }
+function scan(f,   ln, p, r) {
+  inb = 0; body = ""
+  while ((r = (getline ln < f)) > 0) {
+    if (!inb && index(ln, B) == 0) continue
+    gsub(/\\[nrt]/, " ", ln); gsub(/\r/, "", ln)
+    while (length(ln) > 0) {
+      if (!inb) {
+        p = index(ln, B)
+        if (!p) break
+        ln = substr(ln, p + length(B)); inb = 1; body = ""
+      } else {
+        p = index(ln, E)
+        if (p) { body = body substr(ln, 1, p - 1); ln = substr(ln, p + length(E)); inb = 0; emit(f) }
+        else { body = body ln; ln = "" }
+      }
     }
   }
+  if (r < 0) bad++
+  close(f)
+}
+/^@rc / { rc = substr($0, 5); next }
+$0 != "" { scan($0) }
+END {
+  if (rc == "") rc = 1
+  print "@rc " (rc + bad)
 }
 '
 
@@ -309,7 +339,7 @@ END {
       print "FLAG " r ": contains " s "; replace the bundle or point the library at the system store"
     }
   }
-  if (!flagged) {
+  if (!flagged && ENVIRON["CA_SCAN_RC"] == "0") {
     if (nfile == 0) print "CLEAR certificate bundles: no PEM files found"
     else print "CLEAR certificate bundles: " nfile " PEM file(s) scanned, none contains a listed certificate"
   }
@@ -317,7 +347,7 @@ END {
 '
 
 NOT_CHECKED_MACHINE="Homebrew/Python/pip/certifi stores; Java keystores; Go/Rust binaries; Docker Desktop and images; browsers; apps outside /Applications and ~/Applications; apps that patch their own store"
-NOT_CHECKED_REPO_HEAD="lockfiles and version pins; images pulled by name (compose files, CI); runtimes inside images"
+NOT_CHECKED_REPO_HEAD="lockfiles and version pins; images pulled by name (compose files, CI); runtimes inside images; RPM-family base images (UBI, RHEL, CentOS, Fedora, Rocky, Alma, Amazon Linux, Oracle Linux, SUSE)"
 NOT_CHECKED_REPO_TAIL="the live TLS behaviour of built images"
 
 REPORT_FLAG=0
@@ -516,32 +546,49 @@ machine_section() {
 
 meta_get_comp() { CA_DATAFILE=$1 CA_WHAT=ncomp CA_COMP=$2 awk "$AWK_LIB"'BEGIN { load(ENVIRON["CA_DATAFILE"]); print NFIX[ENVIRON["CA_COMP"]] + 0 }'; }
 
+PEM_MARK='-----BEGIN CERTIFICATE-----'
+
 pem_stream() {
-  find -H "$ABS" -name .git -prune -o -type f -exec grep -lI --null -e '-----BEGIN CERTIFICATE-----' {} + 2> /dev/null |
-    CA_ROOT=$ABS xargs -0 awk "$AWK_PEM_EXTRACT" 2> /dev/null
+  {
+    find -H "$ABS" -name .git -prune -o -type f -exec sh -c 'grep -l -F -e "$0" "$@" || [ $? -eq 1 ]' "$PEM_MARK" {} + 2> /dev/null
+    printf '@rc %s\n' "$?"
+  } | CA_ROOT=$ABS awk "$AWK_PEM_EXTRACT"
+}
+
+dockerfile_stream() {
+  CA_DATAFILE=$1 CA_ROOT=$ABS find -H "$ABS" \( -name .git -o -name node_modules \) -prune -o -type f \
+    \( -name Dockerfile -o -name 'Dockerfile.*' -o -name '*.Dockerfile' -o -name '*.dockerfile' -o -name Containerfile -o -name 'Containerfile.*' \) \
+    -exec awk "$AWK_LIB$AWK_DOCKER" {} + 2> /dev/null
+  printf '@rc %s\n' "$?"
 }
 
 repo_section() {
-  local f=$1 dout nseen n
+  local f=$1 dout drc nseen n
   if [ "$(meta_get "$f" npkg)" -gt 0 ]; then
-    dout=$(CA_DATAFILE=$f CA_ROOT=$ABS find -H "$ABS" \( -name .git -o -name node_modules \) -prune -o -type f \
-      \( -name Dockerfile -o -name 'Dockerfile.*' -o -name '*.Dockerfile' -o -name '*.dockerfile' -o -name Containerfile -o -name 'Containerfile.*' \) \
-      -exec awk "$AWK_LIB$AWK_DOCKER" {} \; 2> /dev/null | awk "$AWK_SORT")
-    nseen=$(printf '%s\n' "$dout" | grep -c '^@seen$')
-    dout=$(printf '%s\n' "$dout" | grep -v '^@seen$')
-    if [ "$nseen" -eq 0 ]; then
-      emit "CLEAR container build files: none found"
-    else
+    dout=$(dockerfile_stream "$f")
+    drc=${dout##*@rc }
+    dout=$(printf '%s' "${dout%@rc *}" | awk "$AWK_SORT")
+    nseen=$(printf '%s\n' "$dout" | awk '$0 == "@seen" { n++ } END { print n + 0 }')
+    dout=$(printf '%s\n' "$dout" | awk '$0 != "@seen"')
+    if [ "$drc" != 0 ]; then
+      emit "UNCONFIRMED container build files: the search for Dockerfiles and Containerfiles did not complete (an unreadable directory or a tool failure), so some may have been missed — re-run as a user who can read the whole directory"
+    fi
+    if [ "$nseen" -gt 0 ]; then
       emit_lines "$dout"
+    elif [ "$drc" = 0 ]; then
+      emit "CLEAR container build files: none found"
     fi
   fi
   if [ "$(meta_get "$f" ncert)" -gt 0 ]; then
+    if [ "$PEM_RC" != 0 ]; then
+      emit "UNCONFIRMED certificate bundles: the search for PEM files did not complete (an unreadable directory or a tool failure), so a bundle holding a listed certificate may have been missed — re-run as a user who can read the whole directory"
+    fi
     if [ "$HAVE_OPENSSL" = 1 ]; then
-      emit_lines "$(printf '%s\n' "$HASHES" | CA_DATAFILE=$f awk "$AWK_LIB$AWK_PEM_MATCH")"
+      emit_lines "$(printf '%s\n' "$HASHES" | CA_DATAFILE=$f CA_SCAN_RC=$PEM_RC awk "$AWK_LIB$AWK_PEM_MATCH")"
     elif [ -n "$NOSSL_FILES" ]; then
-      n=$(printf '%s\n' "$NOSSL_FILES" | grep -c .)
+      n=$(printf '%s\n' "$NOSSL_FILES" | awk 'END { print NR }')
       emit "UNCONFIRMED certificate bundles: openssl was not found, so $n PEM file(s) could not be fingerprinted — confirm each with: openssl x509 -noout -fingerprint -sha256 -in <file> and compare it with the cert lines in the data file"
-    else
+    elif [ "$PEM_RC" = 0 ]; then
       emit "CLEAR certificate bundles: no PEM files found"
     fi
   fi
@@ -578,14 +625,17 @@ else
   command -v openssl > /dev/null 2>&1 && HAVE_OPENSSL=1
   HASHES=""
   NOSSL_FILES=""
+  PEM_OUT=$(pem_stream)
+  PEM_RC=${PEM_OUT##*@rc }
+  PEM_OUT=${PEM_OUT%@rc *}
   if [ "$HAVE_OPENSSL" = 1 ]; then
-    HASHES=$(pem_stream | while IFS=$TAB read -r rel b64; do
+    HASHES=$(printf '%s' "$PEM_OUT" | while IFS=$TAB read -r rel b64; do
       [ -n "$rel" ] || continue
       h=$(printf '%s\n' "$b64" | openssl base64 -d -A 2> /dev/null | openssl dgst -sha256 2> /dev/null)
       printf '%s\t%s\n' "$rel" "${h##* }"
     done)
   else
-    NOSSL_FILES=$(pem_stream | cut -f1 | uniq)
+    NOSSL_FILES=$(printf '%s' "$PEM_OUT" | cut -f1 | uniq)
   fi
   printf 'CA distrust audit (read-only): repo %s\n' "$(clean "$ABS")"
 fi
@@ -599,7 +649,7 @@ done
 if [ "$mode" = machine ]; then
   printf 'Not checked: %s\n' "$NOT_CHECKED_MACHINE"
 else
-  KS=$(find -H "$ABS" -name .git -prune -o -type f \( -name '*.jks' -o -name '*.p12' -o -name '*.pfx' -o -name '*.der' -o -name '*.p7b' -o -name cacerts \) -print 2> /dev/null | grep -c .)
+  KS=$(find -H "$ABS" -name .git -prune -o -type f \( -name '*.jks' -o -name '*.p12' -o -name '*.pfx' -o -name '*.der' -o -name '*.p7b' -o -name cacerts \) -print 2> /dev/null | awk 'END { print NR }')
   printf 'Not checked: %s; binary keystores (%s found: .jks .p12 .pfx .der .p7b cacerts); %s\n' \
     "$NOT_CHECKED_REPO_HEAD" "$KS" "$NOT_CHECKED_REPO_TAIL"
 fi
