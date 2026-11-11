@@ -139,6 +139,12 @@ has "rpm-token-in-an-org-path-with-apt-in-the-parent-stage-is-flagged" "$out" '^
 lacks "rpm-token-in-an-org-path-is-not-called-rpm" "$out" 'RPM-family image'
 lacks "rpm-token-in-an-org-path-never-reads-clear" "$out" '^Verdict: CLEAR$'
 
+d="$(newrepo rpm-token-child-of-a-patched-apt-stage)"
+printf 'FROM ghcr.io/photon-labs/api:bookworm AS base\nRUN apt-get update && apt-get install -y ca-certificates=20250419~deb12u2\nFROM base AS app\nRUN echo app\n' > "$d/Dockerfile"
+out="$(audit "$d")"
+has "child-of-a-patched-apt-stage-on-an-rpm-token-image-is-clear" "$out" '^CLEAR Dockerfile: ca-certificates is asserted at a fixed version \(20250419~deb12u2\)$'
+lacks "child-of-an-apt-stage-on-an-rpm-token-image-is-not-called-rpm" "$out" 'RPM-family image'
+
 d="$(newrepo apt-update-alone)"
 printf 'FROM debian:12\nRUN apt-get update && apt-get install -y curl\n' > "$d/Dockerfile"
 out="$(audit "$d")"
@@ -288,6 +294,18 @@ else
   has "unreadable-file-leaves-the-pem-scan-unconfirmed" "$out" '^UNCONFIRMED certificate bundles: .*did not complete'
   lacks "unreadable-file-is-never-clear-for-bundles" "$out" '^CLEAR certificate bundles'
   has "unreadable-file-verdict-is-unconfirmed" "$out" '^Verdict: UNCONFIRMED$'
+
+  d="$(newrepo unreadable-dockerfile-between-readable-ones)"
+  mkdir -p "$d/a" "$d/b"
+  for f in a/Dockerfile a/Dockerfile.x b/Dockerfile; do
+    printf 'FROM debian:12\nRUN apt-get install -y curl\n' > "$d/$f"
+  done
+  chmod 000 "$d/a/Dockerfile.x"
+  out="$(audit "$d")"
+  chmod 644 "$d/a/Dockerfile.x"
+  has "readable-dockerfile-before-an-unreadable-one-is-still-flagged" "$out" '^FLAG a/Dockerfile: '
+  has "readable-dockerfile-after-an-unreadable-one-is-still-flagged" "$out" '^FLAG b/Dockerfile: '
+  has "unreadable-dockerfile-leaves-the-readable-flags-in-the-verdict" "$out" '^Verdict: FLAGGED$'
 fi
 
 d="$(newrepo keystores)"

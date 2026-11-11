@@ -44,12 +44,12 @@ git -C "$repo" -c user.name=Fixture -c user.email=fixture@example.invalid commit
 printf 'untracked\n' > "$repo/untracked.txt"
 printf 'FROM debian:12\n# edited\n' >> "$repo/Dockerfile"
 
-status_before="$(git -C "$repo" status --porcelain)"
+status_before="$(git --no-optional-locks -C "$repo" status --porcelain)"
 head_before="$(git -C "$repo" rev-parse HEAD)"
 before="$(manifest "$repo")"
 plain="$("$SCRIPT" repo "$repo" 2> "$tmp/plain.err")"
 after="$(manifest "$repo")"
-status_after="$(git -C "$repo" status --porcelain)"
+status_after="$(git --no-optional-locks -C "$repo" status --porcelain)"
 head_after="$(git -C "$repo" rev-parse HEAD)"
 
 [ "$before" = "$after" ] && pass "repo-file-stat-manifest-is-unchanged" || bad "repo-file-stat-manifest-is-unchanged" "$(diff <(printf '%s\n' "$before") <(printf '%s\n' "$after"))"
