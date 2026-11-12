@@ -145,6 +145,10 @@ out="$(audit "$d")"
 has "child-of-a-patched-apt-stage-on-an-rpm-token-image-is-clear" "$out" '^CLEAR Dockerfile: ca-certificates is asserted at a fixed version \(20250419~deb12u2\)$'
 lacks "child-of-an-apt-stage-on-an-rpm-token-image-is-not-called-rpm" "$out" 'RPM-family image'
 
+d="$(newrepo rpm-token-apt-in-the-child-stage-only)"
+printf 'FROM ghcr.io/photon-labs/api:bookworm AS base\nRUN echo base\nFROM base AS app\nRUN apt-get update && apt-get install -y curl\n' > "$d/Dockerfile"
+has "unpatched-apt-in-a-child-stage-only-on-an-rpm-token-image-is-flagged" "$(audit "$d")" '^FLAG Dockerfile: '
+
 d="$(newrepo apt-update-alone)"
 printf 'FROM debian:12\nRUN apt-get update && apt-get install -y curl\n' > "$d/Dockerfile"
 out="$(audit "$d")"
