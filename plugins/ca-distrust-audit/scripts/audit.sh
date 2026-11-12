@@ -266,21 +266,38 @@ function flush(   i, p, b, q, worst, anyass, anyscr, anyrpm, rel, f, img, doneim
       print rel "\tUNCONFIRMED " rel ": stage FROM " img " installs or upgrades ca-certificates without asserting a fixed version, and a cached layer keeps an old store — confirm the built image with: docker run --rm <your-image> dpkg-query -W ca-certificates (fixed: " fixedlist(f) ")"
   }
 }
-function endfile() {
+function procline(ln) {
+  sub(/\r$/, "", ln)
+  if (ln ~ /^[ \t]*#/ || ln ~ /^[ \t]*$/) return
+  if (cont) buf = buf " " ln; else buf = ln
+  if (buf ~ /\\[ \t]*$/) { sub(/[ \t]*\\[ \t]*$/, "", buf); cont = 1; return }
+  cont = 0; handle(buf); buf = ""
+}
+function scanfile(f,   ln, r) {
+  CUR = f; ns = 0; cont = 0; buf = ""
+  while ((r = (getline ln < f)) > 0) procline(ln)
+  close(f)
+  if (r < 0) {
+    print relname() "\t@seen"
+    print relname() "\tUNCONFIRMED " relname() ": the file could not be read, so it was not audited — re-run as a user who can read it"
+    ns = 0
+    return
+  }
   if (cont) handle(buf)
-  cont = 0; buf = ""
   flush()
   ns = 0
 }
-FNR == 1 { if (NR > 1) endfile(); CUR = FILENAME }
-{
-  sub(/\r$/, "")
-  if ($0 ~ /^[ \t]*#/ || $0 ~ /^[ \t]*$/) next
-  if (cont) buf = buf " " $0; else buf = $0
-  if (buf ~ /\\[ \t]*$/) { sub(/[ \t]*\\[ \t]*$/, "", buf); cont = 1; next }
-  cont = 0; handle(buf); buf = ""
+/^@rc / { rc = substr($0, 5); next }
+$0 == "@nl" { nl++; next }
+$0 != "" { scanfile($0) }
+END {
+  if (nl) {
+    print "~\t@seen"
+    print "~\tUNCONFIRMED container build files: " nl " file(s) with a newline in the name were not audited — rename them or audit them by hand"
+  }
+  if (rc == "") rc = 1
+  print "@rc " rc
 }
-END { endfile() }
 '
 
 AWK_PEM_EXTRACT='
@@ -563,10 +580,13 @@ pem_stream() {
 }
 
 dockerfile_stream() {
-  CA_DATAFILE=$1 CA_ROOT=$ABS find -H "$ABS" \( -name .git -o -name node_modules \) -prune -o -type f \
-    \( -name Dockerfile -o -name 'Dockerfile.*' -o -name '*.Dockerfile' -o -name '*.dockerfile' -o -name Containerfile -o -name 'Containerfile.*' \) \
-    -exec awk "$AWK_LIB$AWK_DOCKER" {} + 2> /dev/null
-  printf '@rc %s\n' "$?"
+  {
+    find -H "$ABS" \( -name .git -o -name node_modules \) -prune -o -type f \
+      \( -name Dockerfile -o -name 'Dockerfile.*' -o -name '*.Dockerfile' -o -name '*.dockerfile' -o -name Containerfile -o -name 'Containerfile.*' \) \
+      -exec sh -c 'for f; do case $f in *"
+"*) echo @nl ;; *) printf "%s\n" "$f" ;; esac; done' sh {} + 2> /dev/null
+    printf '@rc %s\n' "$?"
+  } | CA_DATAFILE=$1 CA_ROOT=$ABS awk "$AWK_LIB$AWK_DOCKER"
 }
 
 repo_section() {
