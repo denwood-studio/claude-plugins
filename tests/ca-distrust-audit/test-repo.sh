@@ -149,6 +149,12 @@ d="$(newrepo rpm-token-apt-in-the-child-stage-only)"
 printf 'FROM ghcr.io/photon-labs/api:bookworm AS base\nRUN echo base\nFROM base AS app\nRUN apt-get update && apt-get install -y curl\n' > "$d/Dockerfile"
 has "unpatched-apt-in-a-child-stage-only-on-an-rpm-token-image-is-flagged" "$(audit "$d")" '^FLAG Dockerfile: '
 
+d="$(newrepo rpm-token-apt-in-the-grandchild-stage-only)"
+printf 'FROM ghcr.io/photon-labs/api:bookworm AS base\nRUN echo base\nFROM base AS mid\nRUN echo mid\nFROM mid AS app\nRUN apt-get update && apt-get install -y curl\n' > "$d/Dockerfile"
+out="$(audit "$d")"
+has "unpatched-apt-in-a-grandchild-stage-only-on-an-rpm-token-image-is-flagged" "$out" '^FLAG Dockerfile: stage FROM ghcr\.io/photon-labs/api:bookworm '
+lacks "apt-in-a-grandchild-stage-keeps-the-rpm-token-root-from-being-called-rpm" "$out" 'RPM-family image'
+
 d="$(newrepo apt-update-alone)"
 printf 'FROM debian:12\nRUN apt-get update && apt-get install -y curl\n' > "$d/Dockerfile"
 out="$(audit "$d")"
