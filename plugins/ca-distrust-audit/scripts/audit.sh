@@ -220,6 +220,7 @@ function flush(   i, p, b, q, worst, anyass, anyscr, anyrpm, rel, f, img, doneim
   rel = relname()
   print rel "\t@seen"
   worst = 9; anyass = 0; anyscr = 0; anyrpm = 0; doneimg = ""
+  for (i = ns; i >= 1; i--) if (SAPT[i] && SPAR[i]) SAPT[SPAR[i]] = 1
   for (i = 1; i <= ns; i++) {
     ST[i] = -1
     if (SSCR[i]) { anyscr = 1; continue }
