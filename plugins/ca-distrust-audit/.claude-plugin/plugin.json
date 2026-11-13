@@ -1,0 +1,7 @@
+{
+  "name": "ca-distrust-audit",
+  "version": "0.1.0",
+  "description": "A read-only audit of whether your machine or repo still trusts a distrusted certificate authority chain, starting with the October 2026 eMudhra compromise.",
+  "author": { "name": "Denwood Studio" },
+  "license": "MIT"
+}
